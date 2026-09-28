@@ -1,4 +1,5 @@
 import asyncio
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -6,8 +7,9 @@ from urllib.parse import urljoin, urlparse
 
 from playwright.async_api import async_playwright
 
-BASE_URL = "https://mais.sbt.com.br/"
+BASE = "https://mais.sbt.com.br/"
 OUTPUT = Path("mais-sbt.m3u")
+DEBUG = Path("descoberto.json")
 
 UA = (
     "Mozilla/5.0 (X11; Linux x86_64) "
@@ -15,259 +17,333 @@ UA = (
     "Chrome/140.0.0.0 Safari/537.36"
 )
 
-# Termos que ajudam a separar páginas de conteúdo de páginas de canais.
-CHANNEL_HINTS = (
-    "/channel/",
-    "/canais/",
-    "/canal/",
-)
+# Canais atualmente identificados no serviço. Eles servem como referência
+# de nome/categoria; os links reais continuam sendo descobertos no site.
+KNOWN = {
+    "sbt": ("SBT", "SBT"),
+    "sbt rio": ("SBT Rio", "Regional"),
+    "sbt news": ("SBT News", "Notícias"),
+    "sbt novelas": ("+SBT Novelas", "Novelas"),
+    "novelas": ("+SBT Novelas", "Novelas"),
+    "show do milhão": ("Canal Show do Milhão", "Entretenimento"),
+    "sbt kids": ("SBT Kids", "Infantil"),
+}
 
-# Categorias conhecidas do ecossistema +SBT.
-CATEGORY_RULES = [
-    ("Novelas", ("novela", "novelas")),
-    ("Infantil", ("kids", "infantil", "desenho", "bob zoom")),
-    ("Notícias", ("news", "notícia", "noticias")),
-    ("Entretenimento", ("entretenimento", "programas", "variedades")),
-    ("Filmes e Séries", ("filme", "filmes", "série", "series")),
-    ("Esportes", ("esporte", "sports")),
-]
+def clean(s):
+    return re.sub(r"\s+", " ", str(s or "")).strip()
 
-def clean_text(value: str) -> str:
-    value = re.sub(r"\s+", " ", value or "").strip()
-    return value
+def channel_name(text):
+    t = clean(text)
+    low = t.lower()
 
-def normalize_name(value: str) -> str:
-    value = clean_text(value)
-    value = re.sub(r"^\+SBT\s*[-|:]\s*", "", value, flags=re.I)
-    return value[:120]
+    for key, value in KNOWN.items():
+        if key in low:
+            return value
 
-def category_for(name: str) -> str:
+    t = re.sub(r"^\+?sbt\s*[-|:]\s*", "", t, flags=re.I)
+    t = clean(t)
+    return t[:100] if t else "SBT"
+
+def category(name):
     low = name.lower()
-    for category, terms in CATEGORY_RULES:
-        if any(term in low for term in terms):
-            return category
-    return "Entretenimento"
+    if "news" in low or "notícia" in low:
+        return "Notícias"
+    if "novela" in low:
+        return "Novelas"
+    if "kids" in low or "infantil" in low:
+        return "Infantil"
+    if "rio" in low or "regional" in low:
+        return "Regional"
+    if "milhão" in low:
+        return "Entretenimento"
+    return "SBT"
 
-def is_hls(url: str) -> bool:
-    low = url.lower()
-    return ".m3u8" in low and url.startswith(("http://", "https://"))
-
-def same_host(url: str) -> bool:
-    try:
-        return urlparse(url).netloc.endswith("sbt.com.br") or \
-               "s73cloud.com" in urlparse(url).netloc
-    except Exception:
+def valid_stream(url):
+    if not url or not url.startswith(("http://", "https://")):
         return False
-
-def stream_score(url: str) -> int:
     low = url.lower()
-    score = 0
     if ".m3u8" in low:
-        score += 100
-    if "live" in low:
-        score += 10
-    if "master" in low:
-        score += 8
-    if "playlist" in low:
-        score += 5
-    if "manifest" in low:
-        score += 4
-    return score
+        return True
+    # Alguns players usam URLs de CDN que terminam sem extensão.
+    if "s73cloud.com" in low and any(x in low for x in ("live", "stream", "playlist", "manifest", "channel")):
+        return True
+    return False
 
-def ffprobe_ok(url: str) -> bool:
-    """
-    Testa o manifesto HLS sem reproduzir o conteúdo.
-    Não tenta remover DRM nem contornar proteção.
-    """
+def score(url):
+    low = url.lower()
+    s = 0
+    for term, points in (
+        (".m3u8", 100),
+        ("master", 20),
+        ("playlist", 15),
+        ("manifest", 10),
+        ("live", 8),
+        ("s73cloud.com", 5),
+    ):
+        if term in low:
+            s += points
+    return s
+
+def ffprobe(url):
     try:
-        result = subprocess.run(
+        p = subprocess.run(
             [
-                "ffprobe",
-                "-v", "error",
-                "-rw_timeout", "8000000",
+                "ffprobe", "-v", "error",
+                "-rw_timeout", "10000000",
                 "-user_agent", UA,
                 "-i", url,
-                "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1",
+                "-show_entries", "stream=codec_type",
+                "-of", "csv=p=0",
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            timeout=15,
+            timeout=20,
         )
-        return result.returncode == 0
+        return p.returncode == 0 and bool(p.stdout.strip())
     except Exception:
         return False
 
-async def get_page_info(page):
-    title = clean_text(await page.title())
+def extract_channel_urls(text):
+    if not text:
+        return set()
+    result = set()
+    patterns = [
+        r'https?://mais\.sbt\.com\.br/channel/[A-Za-z0-9_-]+',
+        r'["\'](/channel/[A-Za-z0-9_-]+)["\']',
+    ]
+    for pat in patterns:
+        for m in re.findall(pat, text, flags=re.I):
+            result.add(m if m.startswith("http") else urljoin(BASE, m))
+    return result
 
-    # Tenta os elementos mais comuns de título.
-    candidates = []
-    for selector in ("h1", "h2", "[data-testid*='title']", "[class*='title']"):
-        try:
-            texts = await page.locator(selector).all_inner_texts()
-            candidates.extend(texts)
-        except Exception:
-            pass
+async def text_from_page(page):
+    try:
+        return await page.content()
+    except Exception:
+        return ""
 
-    name = ""
-    for item in candidates:
-        item = normalize_name(item)
-        if 2 <= len(item) <= 100:
-            name = item
-            break
-
-    if not name:
-        name = normalize_name(title)
-
-    if not name or name.lower() in {"+sbt", "sbt"}:
-        name = "SBT"
-
-    return name, category_for(name)
-
-async def collect():
+async def discover():
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,
-            args=[
-                "--disable-dev-shm-usage",
-                "--no-sandbox",
-            ],
+            args=["--no-sandbox", "--disable-dev-shm-usage"],
         )
 
         context = await browser.new_context(
             user_agent=UA,
             locale="pt-BR",
             timezone_id="America/Sao_Paulo",
-            viewport={"width": 1440, "height": 900},
+            viewport={"width": 1440, "height": 1000},
         )
 
-        page = await context.new_page()
         discovered = {}
+        channel_pages = set()
+        errors = []
 
-        async def capture_response(response):
-            url = response.url
-            if is_hls(url):
-                # Ignora manifestos claramente associados a anúncios.
-                low = url.lower()
-                if "/preroll/" in low or "adserver" in low:
-                    return
-                discovered.setdefault(url, {
-                    "source": response.url,
+        async def capture(url, page_url, hint="network"):
+            if not valid_stream(url):
+                return
+
+            key = url.split("?")[0]
+            if key not in discovered:
+                discovered[key] = {
+                    "url": url,
+                    "page": page_url,
+                    "hint": hint,
                     "name": "",
-                    "category": "Entretenimento",
-                })
+                    "category": "",
+                }
 
-        page.on("response", capture_response)
-
-        print("Abrindo +SBT...")
-        try:
-            await page.goto(BASE_URL, wait_until="domcontentloaded", timeout=60000)
-        except Exception as exc:
-            print(f"Aviso ao abrir página inicial: {exc}")
-
-        await page.wait_for_timeout(8000)
-
-        # Coleta links de canais presentes na página.
-        hrefs = await page.locator("a").evaluate_all(
-            """els => els.map(a => a.href).filter(Boolean)"""
-        )
-
-        channel_urls = []
-        for href in hrefs:
-            if any(h in href.lower() for h in CHANNEL_HINTS):
-                if href.startswith("https://mais.sbt.com.br/"):
-                    channel_urls.append(href.split("#")[0])
-
-        # Também usa links que apareceram em elementos de vídeo/players.
-        channel_urls = sorted(set(channel_urls))
-        print(f"Páginas de canais descobertas: {len(channel_urls)}")
-
-        # Caso a home já tenha carregado um canal ao vivo, mantém os manifests capturados.
-        pages_to_visit = channel_urls[:80]
-
-        for idx, url in enumerate(pages_to_visit, 1):
-            print(f"[{idx}/{len(pages_to_visit)}] {url}")
-            ch = await context.new_page()
-            ch.on("response", capture_response)
+        async def inspect_page(page, url):
+            # Extrai canais do HTML, scripts e JSON.
+            html = await text_from_page(page)
+            channel_pages.update(extract_channel_urls(html))
 
             try:
-                await ch.goto(url, wait_until="domcontentloaded", timeout=45000)
-                await ch.wait_for_timeout(5000)
+                links = await page.locator("a").evaluate_all(
+                    "els => els.map(a => a.href).filter(Boolean)"
+                )
+                for href in links:
+                    if "/channel/" in href.lower():
+                        channel_pages.add(href.split("#")[0])
+            except Exception:
+                pass
 
-                name, category = await get_page_info(ch)
+            # Tenta iniciar o player.
+            selectors = [
+                "video",
+                "button",
+                "[role=button]",
+                "[class*=play]",
+                "[aria-label*=play i]",
+                "[aria-label*=assistir i]",
+                "[aria-label*=ao vivo i]",
+            ]
 
-                # Associa os manifestos descobertos mais recentemente ao canal.
-                for stream_url, item in discovered.items():
-                    if not item["name"]:
-                        item["name"] = name
-                        item["category"] = category
+            for selector in selectors:
+                try:
+                    loc = page.locator(selector)
+                    count = min(await loc.count(), 8)
+                    for i in range(count):
+                        try:
+                            await loc.nth(i).click(timeout=1200, force=True)
+                            await page.wait_for_timeout(1200)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
 
-            except Exception as exc:
-                print(f"  erro: {exc}")
-            finally:
-                await ch.close()
+            await page.wait_for_timeout(4500)
+
+            # Também lê performance entries.
+            try:
+                resources = await page.evaluate(
+                    "() => performance.getEntriesByType('resource').map(x => x.name)"
+                )
+                for resource in resources:
+                    await capture(resource, url, "performance")
+            except Exception:
+                pass
+
+            # Procura m3u8/CDN no HTML bruto.
+            for match in re.findall(r'https?://[^"\'<>\s]+', html):
+                if valid_stream(match):
+                    await capture(match, url, "html")
+
+            # Nome da página.
+            title = clean(await page.title())
+            h1 = ""
+            try:
+                h1 = clean(await page.locator("h1").first.inner_text(timeout=1000))
+            except Exception:
+                pass
+
+            name = channel_name(h1 or title)
+
+            for item in discovered.values():
+                if item["page"] == url and not item["name"]:
+                    item["name"] = name
+                    item["category"] = category(name)
+
+        page = await context.new_page()
+
+        # Monitoramento de toda a rede da home.
+        page.on(
+            "response",
+            lambda response: capture(
+                response.url, page.url, "response"
+            )
+        )
+
+        try:
+            await page.goto(BASE, wait_until="domcontentloaded", timeout=60000)
+        except Exception as exc:
+            errors.append(f"home: {exc}")
+
+        await page.wait_for_timeout(7000)
+        await inspect_page(page, BASE)
+
+        # Reinspeciona canais à medida que novos links forem encontrados.
+        for _round in range(3):
+            pending = sorted(channel_pages)
+            print(f"Rodada {_round + 1}: {len(pending)} páginas de canais")
+            before = len(channel_pages)
+
+            for url in pending[:100]:
+                ch = await context.new_page()
+                ch.on(
+                    "response",
+                    lambda response, u=url: capture(
+                        response.url, u, "response"
+                    )
+                )
+                try:
+                    await ch.goto(
+                        url,
+                        wait_until="domcontentloaded",
+                        timeout=50000,
+                    )
+                    await ch.wait_for_timeout(3500)
+                    await inspect_page(ch, url)
+                except Exception as exc:
+                    errors.append(f"{url}: {exc}")
+                finally:
+                    await ch.close()
+
+            if len(channel_pages) == before:
+                break
 
         await browser.close()
 
-    # Remove duplicados e ordena pelo nome.
-    records = []
-    for url, item in discovered.items():
-        name = normalize_name(item.get("name") or "SBT")
-        if not name:
-            continue
-        records.append({
-            "name": name,
-            "category": item.get("category") or category_for(name),
-            "url": url,
-        })
+    # Associa nomes conhecidos também quando o título da página for genérico.
+    for item in discovered.values():
+        if not item["name"]:
+            item["name"] = "SBT"
+            item["category"] = "SBT"
 
-    # Se vários manifests foram capturados para o mesmo canal, fica com o primeiro.
-    unique = {}
-    for item in records:
+    # Uma URL por canal/categoria, priorizando manifesto mais explícito.
+    chosen = {}
+    for item in discovered.values():
         key = (item["name"].lower(), item["category"].lower())
-        if key not in unique or stream_score(item["url"]) > stream_score(unique[key]["url"]):
-            unique[key] = item
+        if key not in chosen or score(item["url"]) > score(chosen[key]["url"]):
+            chosen[key] = item
 
-    return list(unique.values())
+    return channel_pages, list(chosen.values()), errors
 
-def write_playlist(items):
-    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+def main():
+    pages, streams, errors = asyncio.run(discover())
+
+    print(f"Páginas descobertas: {len(pages)}")
+    print(f"Streams descobertos: {len(streams)}")
+
+    approved = []
+    for i, item in enumerate(streams, 1):
+        print(f"Teste {i}/{len(streams)}: {item['name']} -> {item['url']}")
+        ok = ffprobe(item["url"])
+        item["tested"] = True
+        item["working"] = ok
+        if ok:
+            approved.append(item)
+            print("  OK")
+        else:
+            print("  FALHOU")
 
     lines = ["#EXTM3U"]
-
-    for item in sorted(items, key=lambda x: (x["category"], x["name"])):
+    for item in sorted(approved, key=lambda x: (x["category"], x["name"])):
         name = item["name"].replace('"', "'")
-        category = item["category"].replace('"', "'")
-        url = item["url"]
-
+        cat = item["category"].replace('"', "'")
         lines.append(
             f'#EXTINF:-1 tvg-id="{name}" tvg-name="{name}" '
             f'tvg-language="pt-BR" tvg-country="BR" '
-            f'group-title="{category}",{name}'
+            f'group-title="{cat}",{name}'
         )
-        lines.append(url)
+        lines.append(item["url"])
 
     OUTPUT.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-def main():
-    items = asyncio.run(collect())
+    debug = {
+        "site": BASE,
+        "paginas_canais": sorted(pages),
+        "streams_encontrados": streams,
+        "streams_aprovados": approved,
+        "total_paginas": len(pages),
+        "total_streams": len(streams),
+        "total_aprovados": len(approved),
+        "erros": errors,
+    }
 
-    print(f"Streams HLS encontrados: {len(items)}")
+    DEBUG.write_text(
+        json.dumps(debug, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
-    valid = []
-    for idx, item in enumerate(items, 1):
-        print(f"Teste {idx}/{len(items)}: {item['name']}")
-        if ffprobe_ok(item["url"]):
-            print("  OK")
-            valid.append(item)
-        else:
-            print("  FALHOU — removido")
+    print(f"Playlist: {OUTPUT}")
+    print(f"Canais ativos: {len(approved)}")
 
-    write_playlist(valid)
-    print(f"Playlist gerada: {OUTPUT}")
-    print(f"Canais ativos publicados: {len(valid)}")
+    if len(approved) == 0:
+        print("ATENÇÃO: nenhum stream foi aprovado.")
+        print("Consulte descoberto.json para identificar em qual etapa a descoberta falhou.")
 
 if __name__ == "__main__":
     main()
