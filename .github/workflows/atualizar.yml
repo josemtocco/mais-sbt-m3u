@@ -35,10 +35,10 @@ jobs:
       - name: Gerar playlist
         run: python gerar_m3u.py
 
-      - name: Publicar alterações
+      - name: Publicar arquivos
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add mais-sbt.m3u
+          git add mais-sbt.m3u descoberto.json
           git diff --cached --quiet || git commit -m "Atualiza playlist +SBT"
           git push
