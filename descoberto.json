@@ -1,14 +1,70 @@
 {
+  "site": "https://mais.sbt.com.br/",
   "catalogo": [
-    "SBT",
-    "SBT Rio",
-    "SBT News",
-    "+SBT Novelas",
-    "Canal Show do Milhão",
-    "SBT Kids"
+    {
+      "name": "SBT",
+      "category": "SBT",
+      "aliases": [
+        "SBT",
+        "SBT Nacional"
+      ]
+    },
+    {
+      "name": "SBT Rio",
+      "category": "Regional",
+      "aliases": [
+        "SBT Rio"
+      ]
+    },
+    {
+      "name": "SBT News",
+      "category": "Notícias",
+      "aliases": [
+        "SBT News"
+      ]
+    },
+    {
+      "name": "+SBT Novelas",
+      "category": "Novelas",
+      "aliases": [
+        "+SBT Novelas",
+        "Plus SBT Novelas"
+      ]
+    },
+    {
+      "name": "Canal Show do Milhão",
+      "category": "Entretenimento",
+      "aliases": [
+        "Show do Milhão"
+      ]
+    },
+    {
+      "name": "SBT Kids",
+      "category": "Infantil",
+      "aliases": [
+        "SBT Kids"
+      ]
+    }
   ],
-  "streams_encontrados": [],
-  "streams_aprovados": [],
+  "total_catalogo": 6,
+  "total_streams_testados": 2,
+  "total_aprovados": 2,
+  "streams_aprovados": [
+    {
+      "name": "SBT News",
+      "url": "https://dai.google.com/linear/hls/event/1XSOdtQ0SH2G8OEmEfGgjQ/master.m3u8",
+      "source": "iptv-org/public catalog",
+      "working": true,
+      "test": "ffprobe OK"
+    },
+    {
+      "name": "SBT",
+      "url": "https://media.cdntvms.com.br/sbt_sat/index.m3u8",
+      "source": "iptv-org/public catalog",
+      "working": true,
+      "test": "ffprobe OK"
+    }
+  ],
   "streams_rejeitados": [],
-  "erros": []
+  "observacao": "A descoberta oficial por HTML não é confiável para este site; streams públicos configurados são testados antes da publicação."
 }

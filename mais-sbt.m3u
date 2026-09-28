@@ -1,1 +1,5 @@
 #EXTM3U
+#EXTINF:-1 tvg-id="SBT" tvg-name="SBT" tvg-language="pt-BR" tvg-country="BR" group-title="SBT",SBT
+https://media.cdntvms.com.br/sbt_sat/index.m3u8
+#EXTINF:-1 tvg-id="SBT News" tvg-name="SBT News" tvg-language="pt-BR" tvg-country="BR" group-title="Notícias",SBT News
+https://dai.google.com/linear/hls/event/1XSOdtQ0SH2G8OEmEfGgjQ/master.m3u8
