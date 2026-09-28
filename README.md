@@ -1,23 +1,18 @@
-# +SBT — Gerador M3U automático
+# +SBT M3U — v3
 
-Gerador de playlist M3U para os canais ao vivo do **+SBT**:
+Gerador de playlist dos canais ao vivo do +SBT.
 
-https://mais.sbt.com.br/
+O catálogo atual do +SBT é usado como referência. Como a página oficial entrega os dados do player dinamicamente e não expõe os canais no HTML inicial para crawlers, o projeto usa uma segunda camada de descoberta de streams públicos.
 
-O projeto foi feito para não depender apenas dos links existentes no HTML inicial. O site é dinâmico, portanto o gerador:
+Canais de referência:
+- SBT
+- SBT Rio
+- SBT News
+- +SBT Novelas
+- Canal Show do Milhão
+- SBT Kids
 
-- abre o +SBT com Chromium;
-- procura links `/channel/` em HTML, scripts e JSON;
-- monitora requisições e respostas da rede;
-- procura manifestos HLS `.m3u8`;
-- procura URLs de CDN usadas pelo player;
-- tenta iniciar os players das páginas encontradas;
-- identifica nome e categoria;
-- testa cada stream com FFmpeg;
-- remove automaticamente streams que falharem;
-- gera `mais-sbt.m3u` diretamente na raiz;
-- grava `descoberto.json` para diagnóstico;
-- atualiza automaticamente pelo GitHub Actions.
+A playlist só publica um canal quando o stream correspondente passa pelo teste `ffprobe`.
 
 ## Estrutura
 
@@ -29,60 +24,42 @@ mais-sbt-m3u/
 ├── mais-sbt.m3u
 ├── descoberto.json
 ├── gerar_m3u.py
+├── fontes.json
 ├── requirements.txt
 └── README.md
 ```
 
-## Instalação local
+## Importante
 
-```bash
-pip install -r requirements.txt
-playwright install chromium
-```
+Esta versão não depende exclusivamente do HTML do `mais.sbt.com.br`.
 
-Também é necessário FFmpeg/ffprobe.
+Ela consulta:
+1. catálogo atual do +SBT;
+2. fontes públicas de M3U/HLS usadas como fallback de descoberta;
+3. teste individual dos streams.
 
-```bash
-python gerar_m3u.py
-```
+Isso é necessário porque a página oficial do +SBT é dinâmica e o crawler pode receber apenas um conteúdo mínimo.
 
-## Arquivos de saída
+Os streams não são inventados. URLs entram na playlist somente depois de serem encontradas em fontes públicas configuradas e aprovadas no teste.
 
-### Playlist
+## GitHub
 
-```text
-mais-sbt.m3u
-```
+Envie os arquivos para o repositório e execute:
 
-### Diagnóstico
+**Actions → Atualizar lista +SBT → Run workflow**
 
-```text
-descoberto.json
-```
+A atualização automática acontece a cada 6 horas.
 
-O diagnóstico informa:
-- páginas de canais descobertas;
-- streams encontrados;
-- streams testados;
-- streams aprovados;
-- erros.
-
-Isso evita que uma execução silenciosamente gere uma playlist vazia.
-
-## GitHub Actions
-
-O workflow roda a cada 6 horas e também pode ser executado manualmente:
-
-**GitHub → Actions → Atualizar lista +SBT → Run workflow**
-
-A lista ficará disponível em:
+Playlist:
 
 ```text
 https://raw.githubusercontent.com/josemtocco/SEU-REPOSITORIO/main/mais-sbt.m3u
 ```
 
-Substitua `SEU-REPOSITORIO` pelo nome do seu repositório.
+Diagnóstico:
 
-## Observação
+```text
+descoberto.json
+```
 
-O gerador captura somente manifestos de reprodução disponibilizados pelo próprio site/player. Ele não tenta quebrar DRM ou contornar autenticação.
+O diagnóstico mostra encontrados, aprovados e rejeitados.

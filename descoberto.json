@@ -1,10 +1,14 @@
 {
-  "site": "https://mais.sbt.com.br/",
-  "paginas_canais": [],
+  "catalogo": [
+    "SBT",
+    "SBT Rio",
+    "SBT News",
+    "+SBT Novelas",
+    "Canal Show do Milhão",
+    "SBT Kids"
+  ],
   "streams_encontrados": [],
   "streams_aprovados": [],
-  "total_paginas": 0,
-  "total_streams": 0,
-  "total_aprovados": 0,
+  "streams_rejeitados": [],
   "erros": []
 }

@@ -1,0 +1,80 @@
+{
+  "catalogo": [
+    {
+      "name": "SBT",
+      "category": "SBT",
+      "aliases": [
+        "SBT",
+        "SBT Nacional"
+      ]
+    },
+    {
+      "name": "SBT Rio",
+      "category": "Regional",
+      "aliases": [
+        "SBT Rio"
+      ]
+    },
+    {
+      "name": "SBT News",
+      "category": "Notícias",
+      "aliases": [
+        "SBT News"
+      ]
+    },
+    {
+      "name": "+SBT Novelas",
+      "category": "Novelas",
+      "aliases": [
+        "+SBT Novelas",
+        "Plus SBT Novelas"
+      ]
+    },
+    {
+      "name": "Canal Show do Milhão",
+      "category": "Entretenimento",
+      "aliases": [
+        "Show do Milhão"
+      ]
+    },
+    {
+      "name": "SBT Kids",
+      "category": "Infantil",
+      "aliases": [
+        "SBT Kids"
+      ]
+    }
+  ],
+  "streams": [
+    {
+      "name": "SBT News",
+      "url": "https://dai.google.com/linear/hls/event/1XSOdtQ0SH2G8OEmEfGgjQ/master.m3u8",
+      "source": "iptv-org/public catalog"
+    },
+    {
+      "name": "SBT Kids",
+      "url": "https://8994803e454548319ffc0775bc04e0c1.mediatailor.us-east-1.amazonaws.com/v1/master/215c0da80606fed29372070168106400a6ca7e1a/SSAI-TVZyn/index.m3u8",
+      "source": "public IPTV catalog"
+    },
+    {
+      "name": "+SBT Novelas",
+      "url": "https://t.freetv.fun/live/plus-sbt-novelas.m3u8",
+      "source": "public stream index"
+    },
+    {
+      "name": "Canal Show do Milhão",
+      "url": "https://t.freetv.fun/live/show-do-milhao.m3u8",
+      "source": "public stream index"
+    },
+    {
+      "name": "SBT",
+      "url": "https://dai.google.com/linear/hls/event/Gmgmn9icSMOL6TAePageWQ/master.m3u8",
+      "source": "iptv-org/public catalog"
+    },
+    {
+      "name": "SBT",
+      "url": "https://media.cdntvms.com.br/sbt_sat/index.m3u8",
+      "source": "iptv-org/public catalog"
+    }
+  ]
+}
